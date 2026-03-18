@@ -891,6 +891,7 @@ void postInit(){
     //add_gpu_device_memory_usage(getpid(),0,context_size,0);
     env_utilization_switch = set_env_utilization_switch();
     init_utilization_watcher();
+    init_config_watcher();
 }
 
 CUresult cuInit(unsigned int Flags){

@@ -29,6 +29,10 @@
 #define ENV_OVERRIDE_FILE "/overrideEnv"
 #define CUDA_TASK_PRIORITY_ENV "CUDA_TASK_PRIORITY"
 
+#define HAMI_DYNAMIC_CONFIG_ENV "HAMI_DYNAMIC_CONFIG_PATH"
+#define HAMI_DYNAMIC_CONFIG_DEFAULT "/usr/local/vgpu/dynamic-config"
+#define HAMI_CONFIG_WATCHER_INTERVAL_SEC 2
+
 #define CUDA_DEVICE_MAX_COUNT 16
 #define CUDA_DEVICE_MEMORY_UPDATE_SUCCESS 0
 #define CUDA_DEVICE_MEMORY_UPDATE_FAILURE 1
@@ -182,4 +186,8 @@ unsigned int nvml_to_cuda_map(unsigned int nvmldev);
 unsigned int cuda_to_nvml_map(unsigned int cudadev);
 
 int clear_proc_slot_nolock(int);
+
+void init_config_watcher();
+int reload_dynamic_config(const char *filepath);
+
 #endif  // __MULTIPROCESS_MEMORY_LIMIT_H__

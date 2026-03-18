@@ -957,6 +957,21 @@ int set_current_device_sm_limit_scale(int dev, int scale) {
     return 0;
 }
 
+int set_current_device_sm_limit(int dev, int newlimit) {
+    ensure_initialized();
+    if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
+        LOG_ERROR("Illegal device id: %d", dev);
+        return -1;
+    }
+    if (newlimit < 0 || newlimit > 100) {
+        LOG_ERROR("SM limit out of range [0,100]: %d", newlimit);
+        return -1;
+    }
+    LOG_INFO("dev %d sm limit set to %d", dev, newlimit);
+    region_info.shared_region->sm_limit[dev] = (uint64_t)newlimit;
+    return 0;
+}
+
 int get_current_device_sm_limit(int dev) {
     ensure_initialized();
     if (dev < 0 || dev >= CUDA_DEVICE_MAX_COUNT) {
@@ -1092,4 +1107,97 @@ int comparelwr(const char *s1,char *s2){
             return 1;
         }
     return 0;
+}
+
+static size_t parse_limit_value(const char* value) {
+    size_t len = strlen(value);
+    if (len == 0) return 0;
+    size_t scalar = 1;
+    char* digit_end = (char*)value + len;
+    if (value[len - 1] == 'G' || value[len - 1] == 'g') {
+        digit_end -= 1;
+        scalar = 1024UL * 1024 * 1024;
+    } else if (value[len - 1] == 'M' || value[len - 1] == 'm') {
+        digit_end -= 1;
+        scalar = 1024UL * 1024;
+    } else if (value[len - 1] == 'K' || value[len - 1] == 'k') {
+        digit_end -= 1;
+        scalar = 1024UL;
+    }
+    size_t res = strtoul(value, &digit_end, 0);
+    return res * scalar;
+}
+
+int reload_dynamic_config(const char *filepath) {
+    FILE *f = fopen(filepath, "r");
+    if (f == NULL) return -1;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        if (line[strlen(line) - 1] == '\n')
+            line[strlen(line) - 1] = '\0';
+
+        char *eq = strchr(line, '=');
+        if (eq == NULL) continue;
+        *eq = '\0';
+        char *key = line;
+        char *val = eq + 1;
+
+        if (strncmp(key, CUDA_DEVICE_MEMORY_LIMIT, strlen(CUDA_DEVICE_MEMORY_LIMIT)) == 0) {
+            char *suffix = key + strlen(CUDA_DEVICE_MEMORY_LIMIT);
+            if (suffix[0] == '_') {
+                int dev = atoi(suffix + 1);
+                size_t newlimit = parse_limit_value(val);
+                if (newlimit > 0) {
+                    LOG_INFO("dynamic config: set memory limit dev %d to %zu", dev, newlimit);
+                    set_current_device_memory_limit(dev, newlimit);
+                }
+            }
+        } else if (strncmp(key, CUDA_DEVICE_SM_LIMIT, strlen(CUDA_DEVICE_SM_LIMIT)) == 0) {
+            char *suffix = key + strlen(CUDA_DEVICE_SM_LIMIT);
+            if (suffix[0] == '_') {
+                int dev = atoi(suffix + 1);
+                int newlimit = atoi(val);
+                LOG_INFO("dynamic config: set sm limit dev %d to %d", dev, newlimit);
+                set_current_device_sm_limit(dev, newlimit);
+            }
+        }
+    }
+    fclose(f);
+    return 0;
+}
+
+static void* config_watcher_thread(void* arg) {
+    (void)arg;
+    char *config_path = getenv(HAMI_DYNAMIC_CONFIG_ENV);
+    if (config_path == NULL) {
+        config_path = HAMI_DYNAMIC_CONFIG_DEFAULT;
+    }
+    LOG_INFO("config_watcher: watching %s", config_path);
+
+    time_t prev_mtime = 0;
+    while (1) {
+        struct stat st;
+        if (stat(config_path, &st) == 0) {
+            if (st.st_mtime != prev_mtime) {
+                LOG_INFO("config_watcher: detected change in %s", config_path);
+                reload_dynamic_config(config_path);
+                prev_mtime = st.st_mtime;
+            }
+        }
+        sleep(HAMI_CONFIG_WATCHER_INTERVAL_SEC);
+    }
+    return NULL;
+}
+
+void init_config_watcher() {
+    pthread_t watcher_tid;
+    int ret = pthread_create(&watcher_tid, NULL, config_watcher_thread, NULL);
+    if (ret != 0) {
+        LOG_ERROR("Failed to create config_watcher thread: %d", ret);
+        return;
+    }
+    pthread_detach(watcher_tid);
+    LOG_INFO("config_watcher thread started");
 }
